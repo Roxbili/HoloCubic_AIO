@@ -4,7 +4,9 @@
 #include <string.h>
 #include <math.h>
 #include <Wire.h>
+#include "lvgl.h"
 #include "ui_animation.h"
+#include "idea.h"
 
 /*********时钟相关的参数**********/
 #define CLOCK_POS_X 120 //时钟中心点x/y坐标//像素点为单位
@@ -59,6 +61,22 @@ void rotateY(double angle, double *point, double *output);           // rotate m
 void rotateZ(double angle, double *point, double *output);           // rotate matrix for Z
 void projectOnXY(double *point, double *output, double zFactor);
 /*****************/
+
+
+
+//h = 0..359, s = 0..100, v = 0..100
+uint16_t randomColorHSV(int hmin,int hmax,int smin,int smax,int vmin,int vmax)
+{
+    
+    float h = (((float)rand()/(RAND_MAX))*((float)(hmax-hmin))+(float)hmin);
+    h = h>360?h-360:h;
+    float s = (((float)rand()/(RAND_MAX))*((float)(smax-smin))+(float)smin);
+    float v = (((float)rand()/(RAND_MAX))*((float)(vmax-vmin))+(float)vmin);
+    lv_color_t c = lv_color_hsv_to_rgb(h, s, v);
+    
+    return (lv_color_to8(c));
+}
+
 
 /**星空穿越特效类*/
 class c_star
@@ -556,6 +574,100 @@ private:
 };
 /*****************/
 
+/*********************************************/
+/*珊瑚的参数*/
+#define SANHU_TOTAL 80         //总数
+#define VISCOSITY 0.95       //粘性系数
+#define SANHUSIZE 250         //珊瑚大小
+class Sanhu
+{
+public:
+    Sanhu()
+    {
+        init();
+    }
+
+    void init()
+    {
+        xPos = ((float)rand()/RAND_MAX)*240; 
+        yPos = ((float)rand()/RAND_MAX)*240;
+        xVel = 0; 
+        yVel = 0;
+        mass = ((float)rand()/RAND_MAX)*0.03 + 0.005;
+        color = randomColorHSV(330,45+359,80,100,90,100);
+        R = (int32_t)(SANHUSIZE * mass);
+    }
+
+    void move()
+    {
+        xPos += xVel;
+        yPos += yVel;
+    }
+
+    void draw()
+    {
+        screen_fill_circle(xPos, yPos, R, color);
+    }
+
+    float xPos, yPos, xVel, yVel,mass;
+    uint16_t color;
+    int32_t R;
+};
+
+Sanhu sanhu[SANHU_TOTAL]; //
+float absF(float a)
+{
+    return a > 0 ? a : -a;
+}
+
+void ui_updateForParticle(float accXinc, float accYinc)
+{
+    for (int i = 0; i < SANHU_TOTAL; i++)
+    {
+        float accX = 0; float accY = 0;
+        bool flagUse = true;
+        float disXL = (120 - sanhu[i].xPos);
+        float disYL = (120 - sanhu[i].yPos);
+        float polarR = sqrt(disXL * disXL + disYL * disYL);
+        float polarT = atan2(disYL , disXL);
+
+        if (polarR > 80/sqrt(1-absF(cos(polarT))*sin(polarT))) 
+        {
+            accX += 0.4 * disXL;
+            accY += 0.4 * disYL;
+            flagUse = false;
+        }
+
+        for (int j = 0; j < SANHU_TOTAL; j++) 
+        {
+            if (flagUse) 
+            {
+                if (i != j) 
+                {
+                    float x = sanhu[j].xPos - sanhu[i].xPos;
+                    float y = sanhu[j].yPos - sanhu[i].yPos;
+                    float dis = sqrt(x * x + y * y);
+                    if (dis < 1) dis = 1;
+    
+                    float force = (dis - 120) * sanhu[j].mass / dis;
+                    accX += force * x;
+                    accY += force * y;
+                }
+            }
+        }
+        accX += accXinc;
+        accY += accYinc;
+        sanhu[i].xVel = sanhu[i].xVel * VISCOSITY + accX * sanhu[i].mass;
+        sanhu[i].yVel = sanhu[i].yVel * VISCOSITY + accY * sanhu[i].mass;
+        sanhu[i].move();
+        sanhu[i].draw();
+    }
+}
+
+/*********************************************/
+
+
+
 double Cube::points[8][3] = //方块大小设置
     {
         {-SHAPE_SIZE, -SHAPE_SIZE, -SHAPE_SIZE}, // x, y, z
@@ -598,6 +710,34 @@ void create_ui(void *phy_fb, int screen_width, int screen_height, int color_byte
     /***********这里是自定义需要的初始化******/
     time_clock.set_hands(CLOCK_RADIUS, HOUR_HAND_LEN, 2, HOUR_HAND_RGB, MINUTE_HAND_LEN, 4, MINUTE_HAND_RGB, SECOND_HAND_LEN, 6, SECOND_HAND_RGB);
     /*****************/
+}
+
+void create_uiForParticle(void *phy_fb, int screen_width, int screen_height, int color_bytes, struct EXTERNAL_GFX_OP *gfx_op) //ui的初始化函数
+{
+    /**********这部分使用时几乎不需要修改*******/
+    if (phy_fb)
+    {
+        static c_surface surface(UI_WIDTH, UI_HEIGHT, color_bytes, Z_ORDER_LEVEL_0);
+        static c_display display(phy_fb, screen_width, screen_height, &surface);
+        s_surface = &surface;
+        s_display = &display;
+    }
+    else
+    { //for MCU without framebuffer
+        static c_surface_no_fb surface_no_fb(UI_WIDTH, UI_HEIGHT, color_bytes, gfx_op, Z_ORDER_LEVEL_0);
+        static c_display display(phy_fb, screen_width, screen_height, &surface_no_fb);
+        s_surface = &surface_no_fb;
+        s_display = &display;
+    }
+
+    //background
+    s_surface->fill_rect(0, 0, UI_WIDTH, UI_HEIGHT, 0, Z_ORDER_LEVEL_0);
+    /*****************/
+
+    for (int i = 0; i < SANHU_TOTAL; i++)
+    {
+        sanhu[i].init();
+    }
 }
 
 void ui_update(int choose)

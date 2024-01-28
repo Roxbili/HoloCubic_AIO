@@ -4,6 +4,8 @@
 void ui_update(int);
 void create_ui(void *phy_fb, int screen_width, int screen_height,
                int color_bytes, struct EXTERNAL_GFX_OP *gfx_op);
-
+void ui_updateForParticle(float accXinc, float accYinc);
+void create_uiForParticle(void *phy_fb, int screen_width, int screen_height,
+               int color_bytes, struct EXTERNAL_GFX_OP *gfx_op);
 
 #endif
